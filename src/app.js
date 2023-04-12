@@ -6,11 +6,10 @@ import { MongoClient } from "mongodb";
 
 const app = express();
 
-app.use(cors);
+app.use(cors());
 app.use(express.json());
 dotenv.config();
 
-const dayjs = require("dayjs");
 const mongoClient = new MongoClient(process.env.DATABASE_URL);
 
 let db;
@@ -38,7 +37,18 @@ app.post("/participantes", (req, res) => {
 		time: dayjs().format(),
 	};
 
-	db.collection("messages").insertOne();
+	db.collection("messages").insertOne(infoMessages);
+});
+
+app.get("/participantes", (req, res) => {
+	db.collection("participantes")
+		.find()
+		.toArray()
+		.then((r) => res.send(r))
+		.catch((err) => {
+			console.error("Erro ao obter participantes do banco de dados:", err);
+			res.sendStatus(500);
+		});
 });
 
 app.listen(PORT, () => console.log(`Rodando na porta ${PORT}`));
