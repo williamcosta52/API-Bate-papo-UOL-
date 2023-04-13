@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import dayjs from "dayjs";
+import joi from "joi";
 import { MongoClient } from "mongodb";
 
 const app = express();
@@ -22,19 +23,23 @@ mongoClient
 	})
 	.catch((err) => console.log(err.message));
 
-app.post("/participantes", (req, res) => {
+app.post("/participantes", async (req, res) => {
 	const { name } = req.body;
-	db.collection("participantes")
-		.insertOne({ name, lastStatus: Date.now() })
-		.then(() => res.sendStatus(201))
-		.catch();
+	const userSchema = joi.object({
+		name: joi.string().required(),
+	});
+	const valid = userSchema.validate(name, { abortEarly: false });
+
+	if (valid.error) return res.sendStatus(422);
+
+	db.collection("participantes").insertOne({ name, lastStatus: Date.now() });
 
 	const infoMessages = {
 		from: name,
 		to: "Todos",
 		text: "entra na sala...",
 		type: "status",
-		time: dayjs().format(),
+		time: dayjs().format("HH:mm:ss"),
 	};
 
 	db.collection("messages").insertOne(infoMessages);
@@ -49,6 +54,47 @@ app.get("/participantes", (req, res) => {
 			console.error("Erro ao obter participantes do banco de dados:", err);
 			res.sendStatus(500);
 		});
+});
+
+app.post("/messages", (req, res) => {
+	const { to, text, type } = req.body;
+	const { user } = req.headers;
+	const message = joi.object({
+		to: joi.string().required(),
+		text: joi.string().required(),
+		type: joi.string().valid("message", "private_message").required(),
+	});
+
+	const valid = message.validate({ to, text, type }, { abortEarly: false });
+
+	if (valid.error) return res.sendStatus(422);
+
+	db.collection("participantes")
+		.find({ name: user })
+		.catch((err) => res.status(422).send(err.message));
+});
+
+app.get("/messages", (req, res) => {
+	const { user } = req.headers;
+	let limit;
+	let showMessages;
+
+	const messages = db
+		.collection("messages")
+		.find({ $or: [{ from: user }, { to: user }, { to: "todos" }] })
+		.toArray();
+
+	if (req.query.limit) {
+		limit = Number(req.query.limit);
+		if (limit < 1 || isNaN(limit)) {
+			res.sendStatus(422);
+		} else {
+			showMessages = messages.slice(-limit).reverse();
+			return res.status(200).send(showMessages);
+		}
+	} else if (!limit) {
+		res.send(messages);
+	}
 });
 
 app.listen(PORT, () => console.log(`Rodando na porta ${PORT}`));
