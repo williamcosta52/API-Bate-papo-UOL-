@@ -13,15 +13,13 @@ dotenv.config();
 
 const mongoClient = new MongoClient(process.env.DATABASE_URL);
 
-let db;
+try {
+	await mongoClient.connect();
+} catch (err) {
+	console.log(err.message);
+}
+const db = mongoClient.db();
 const PORT = 5000;
-
-mongoClient
-	.connect()
-	.then(() => {
-		db = mongoClient.db();
-	})
-	.catch((err) => console.log(err.message));
 
 app.post("/participantes", async (req, res) => {
 	const { name } = req.body;
@@ -32,68 +30,96 @@ app.post("/participantes", async (req, res) => {
 
 	if (valid.error) return res.sendStatus(422);
 
-	db.collection("participantes").insertOne({ name, lastStatus: Date.now() });
+	try {
+		await db
+			.collection("participantes")
+			.insertOne({ name, lastStatus: Date.now() });
 
-	const infoMessages = {
-		from: name,
-		to: "Todos",
-		text: "entra na sala...",
-		type: "status",
-		time: dayjs().format("HH:mm:ss"),
-	};
+		const infoMessages = {
+			from: name,
+			to: "Todos",
+			text: "entra na sala...",
+			type: "status",
+			time: dayjs().format("HH:mm:ss"),
+		};
 
-	db.collection("messages").insertOne(infoMessages);
+		await db.collection("messages").insertOne(infoMessages);
+	} catch (err) {
+		res.send(err.message);
+	}
 });
 
-app.get("/participantes", (req, res) => {
-	db.collection("participantes")
-		.find()
-		.toArray()
-		.then((r) => res.send(r))
-		.catch((err) => {
-			console.error("Erro ao obter participantes do banco de dados:", err);
-			res.sendStatus(500);
-		});
+app.get("/participantes", async (req, res) => {
+	try {
+		const users = await db.collection("participantes").find().toArray();
+		res.send(users);
+	} catch (err) {
+		console.error("Erro ao obter participantes do banco de dados:", err);
+		res.sendStatus(500);
+	}
 });
 
-app.post("/messages", (req, res) => {
+app.post("/messages", async (req, res) => {
 	const { to, text, type } = req.body;
 	const { user } = req.headers;
-	const message = joi.object({
-		to: joi.string().required(),
-		text: joi.string().required(),
-		type: joi.string().valid("message", "private_message").required(),
-	});
 
-	const valid = message.validate({ to, text, type }, { abortEarly: false });
+	try {
+		if (!to || !text || !type) return res.sendStatus(422);
+		const participant = await db
+			.collection("participantes")
+			.findOne({ name: user });
 
-	if (valid.error) return res.sendStatus(422);
+		if (!participant) return res.sendStatus(422);
 
-	db.collection("participantes")
-		.find({ name: user })
-		.catch((err) => res.status(422).send(err.message));
+		const message = joi.object({
+			to: joi.string().required(),
+			text: joi.string().required(),
+			type: joi.string().valid("message", "private_message").required(),
+		});
+
+		const valid = message.validate({ to, text, type }, { abortEarly: false });
+
+		if (valid.error) return res.sendStatus(422);
+
+		await db.collection("participantes").insertOne({
+			from: user,
+			to,
+			text,
+			type,
+			time: dayjs(Date.now()).format("HH:mm:ss"),
+		});
+		return res.sendStatus(201);
+	} catch (err) {
+		res.status(422).send(err.message);
+	}
 });
 
-app.get("/messages", (req, res) => {
+app.get("/messages", async (req, res) => {
 	const { user } = req.headers;
 	let limit;
 	let showMessages;
 
-	const messages = db
-		.collection("messages")
-		.find({ $or: [{ from: user }, { to: user }, { to: "todos" }] })
-		.toArray();
+	try {
+		const messages = await db
+			.collection("messages")
+			.find({ $or: [{ from: user }, { to: user }, { to: "todos" }] })
+			.toArray();
 
-	if (req.query.limit) {
-		limit = Number(req.query.limit);
-		if (limit < 1 || isNaN(limit)) {
-			res.sendStatus(422);
+		if (req.query.limit) {
+			limit = Number(req.query.limit);
+			if (limit < 1 || isNaN(limit)) {
+				res.sendStatus(422);
+			} else {
+				showMessages = messages.slice(-limit).reverse();
+				return res.status(200).send(showMessages);
+			}
 		} else {
+			limit = Number(req.query.limit);
 			showMessages = messages.slice(-limit).reverse();
 			return res.status(200).send(showMessages);
 		}
-	} else if (!limit) {
-		res.send(messages);
+	} catch (err) {
+		res.send(err.message);
 	}
 });
 
