@@ -1,4 +1,4 @@
-import express from "express";
+import express, { json } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import dayjs from "dayjs";
@@ -8,7 +8,7 @@ import { MongoClient } from "mongodb";
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(json());
 dotenv.config();
 
 const mongoClient = new MongoClient(process.env.DATABASE_URL);
@@ -21,19 +21,31 @@ try {
 const db = mongoClient.db();
 const PORT = 5000;
 
-app.post("/participantes", async (req, res) => {
+app.post("/participants", async (req, res) => {
 	const { name } = req.body;
-	const userSchema = joi.object({
-		name: joi.string().required(),
-	});
-	const valid = userSchema.validate(name, { abortEarly: false });
 
-	if (valid.error) return res.sendStatus(422);
+	if (!name) return res.status(400).send("Missing required field: name");
+
+	const userSchema = joi.object({
+		name: joi.string().min(1).required(),
+	});
+	const validation = userSchema.validate({ name: name }, { abortEarly: false });
+
+	if (validation.error) {
+		const errors = validation.error.details.map((d) => d.message);
+
+		return res.status(422).send(errors);
+	}
+	const verifyUser = await db
+		.collection("participantes")
+		.findOne({ name: name });
+
+	if (verifyUser) return res.sendStatus(409);
 
 	try {
 		await db
 			.collection("participantes")
-			.insertOne({ name, lastStatus: Date.now() });
+			.insertOne({ name: name, lastStatus: Date.now() });
 
 		const infoMessages = {
 			from: name,
@@ -47,6 +59,7 @@ app.post("/participantes", async (req, res) => {
 	} catch (err) {
 		res.send(err.message);
 	}
+	return res.sendStatus(201);
 });
 
 app.get("/participantes", async (req, res) => {
