@@ -147,15 +147,40 @@ app.post("/status", async (req, res) => {
 	if (!user) return res.sendStatus(404);
 
 	try {
-		const userStatus = await db
-			.collection("participants")
-			.findOne({ name: user });
-		if (!userStatus) res.sendStatus(404);
-		userStatus.lastStatus = Date.now();
+		const query = { name: user };
+		const update = { $set: { lastStatus: Date.now() } };
+		const result = await db.collection("participants").updateOne(query, update);
+		if (result.matchedCount === 0) return res.sendStatus(404);
 		res.sendStatus(200);
 	} catch (err) {
 		res.send(err);
 	}
 });
+
+setInterval(() => {
+	verifyActiveUser();
+}, 15000);
+
+async function verifyActiveUser() {
+	let user;
+	const users = await db.collection("participants").find().toArray();
+
+	for (let i = 0; i < users.length; i++) {
+		user = users[i];
+
+		if (Date.now() - user[i].lastStatus > 10000) {
+			const query = { _id: user._id };
+			db.collection("participants").deleteOne(query);
+
+			db.collection("messages").insertOne({
+				from: user.name,
+				to: "Todos",
+				text: "sai da sala...",
+				type: "status",
+				time: dayjs(Date.now()).format("HH:mm:ss"),
+			});
+		}
+	}
+}
 
 app.listen(PORT, () => console.log(`Rodando na porta ${PORT}`));
