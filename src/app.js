@@ -24,7 +24,7 @@ const PORT = 5000;
 app.post("/participants", async (req, res) => {
 	const { name } = req.body;
 
-	if (!name) return res.status(400).send("Missing required field: name");
+	if (!name) return res.status(422).send("Missing required field: name");
 
 	const userSchema = joi.object({
 		name: joi.string().min(1).required(),
@@ -37,14 +37,14 @@ app.post("/participants", async (req, res) => {
 		return res.status(422).send(errors);
 	}
 	const verifyUser = await db
-		.collection("participantes")
+		.collection("participants")
 		.findOne({ name: name });
 
 	if (verifyUser) return res.sendStatus(409);
 
 	try {
 		await db
-			.collection("participantes")
+			.collection("participants")
 			.insertOne({ name: name, lastStatus: Date.now() });
 
 		const infoMessages = {
@@ -62,9 +62,10 @@ app.post("/participants", async (req, res) => {
 	return res.sendStatus(201);
 });
 
-app.get("/participantes", async (req, res) => {
+app.get("/participants", async (req, res) => {
 	try {
-		const users = await db.collection("participantes").find().toArray();
+		const users = await db.collection("participants").find().toArray();
+		if (!users) return res.sendStatus(404);
 		res.send(users);
 	} catch (err) {
 		console.error("Erro ao obter participantes do banco de dados:", err);
@@ -77,9 +78,8 @@ app.post("/messages", async (req, res) => {
 	const { user } = req.headers;
 
 	try {
-		if (!to || !text || !type) return res.sendStatus(422);
 		const participant = await db
-			.collection("participantes")
+			.collection("participants")
 			.findOne({ name: user });
 
 		if (!participant) return res.sendStatus(422);
@@ -90,11 +90,14 @@ app.post("/messages", async (req, res) => {
 			type: joi.string().valid("message", "private_message").required(),
 		});
 
-		const valid = message.validate({ to, text, type }, { abortEarly: false });
+		const validation = message.validate(
+			{ to, text, type },
+			{ abortEarly: false }
+		);
 
-		if (valid.error) return res.sendStatus(422);
+		if (validation.error) return res.sendStatus(422);
 
-		await db.collection("participantes").insertOne({
+		await db.collection("messages").insertOne({
 			from: user,
 			to,
 			text,
@@ -115,8 +118,10 @@ app.get("/messages", async (req, res) => {
 	try {
 		const messages = await db
 			.collection("messages")
-			.find({ $or: [{ from: user }, { to: user }, { to: "todos" }] })
+			.find({ $or: [{ from: user }, { to: user }, { to: "Todos" }] })
 			.toArray();
+
+		if (!req.query.limit) return res.send(messages);
 
 		if (req.query.limit) {
 			limit = Number(req.query.limit);
@@ -133,6 +138,23 @@ app.get("/messages", async (req, res) => {
 		}
 	} catch (err) {
 		res.send(err.message);
+	}
+});
+
+app.post("/status", async (req, res) => {
+	const { user } = req.headers;
+
+	if (!user) return res.sendStatus(404);
+
+	try {
+		const userStatus = await db
+			.collection("participants")
+			.findOne({ name: user });
+		if (!userStatus) res.sendStatus(404);
+		userStatus.lastStatus = Date.now();
+		res.sendStatus(200);
+	} catch (err) {
+		res.send(err);
 	}
 });
 
