@@ -168,7 +168,11 @@ async function verifyActiveUser() {
 	for (let i = 0; i < users.length; i++) {
 		user = users[i];
 
-		if (Date.now() - user[i].lastStatus > 10000) {
+		if (
+			user.lastStatus &&
+			typeof user.lastStatus === "number" &&
+			Date.now() - user.lastStatus > 10000
+		) {
 			const query = { _id: user._id };
 			db.collection("participants").deleteOne(query);
 
